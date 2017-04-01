@@ -1,0 +1,14 @@
+{
+	"version":201704001,
+	"factory":"beiqiqi",
+	"v201704001":[{
+		"url":"https://raw.githubusercontent.com/daylightnework/MGW/master/root_uImage_new4300_v1",
+		"size":7292543,
+		"md5":"1234456789"
+	}],
+	"v201704002":[{
+		"url":"https://raw.githubusercontent.com/daylightnework/MGW/master/root_uImage_new4300_v2",
+		"size":7292543,
+		"md5":"000000"	
+	}]
+}
