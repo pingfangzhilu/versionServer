@@ -1,12 +1,12 @@
 {
-	"version":201704001,
+	"version":20170402,
 	"factory":"beiqiqi",
-	"v201704001":[{
-		"url":"https://raw.githubusercontent.com/daylightnework/MGW/master/root_uImage_new4300_v1",
-		"size":7292543,
-		"md5":"1234456789"
+	"v20170402":[{
+		"url":"https://raw.githubusercontent.com/pingfangzhilu/version/master/image20170402",
+		"size":7369003,
+		"md5":"2e67adb2a99db30a1c608cc8ee6d8e28"
 	}],
-	"v201704002":[{
+	"v20170401":[{
 		"url":"https://raw.githubusercontent.com/daylightnework/MGW/master/root_uImage_new4300_v2",
 		"size":7292543,
 		"md5":"000000"	

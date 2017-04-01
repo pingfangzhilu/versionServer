@@ -60,8 +60,8 @@ static int SendVersionProguess(char *handler,int value){
 	return ssize;
 }
 
-//解析json 数据，提取服务器版本号信息、和url地址
-static int getNewVersionUrl(Version *v,char *recvdata,char *newUrl){
+//解析服务器上版本json 数据，提取服务器版本号信息、和固件url地址
+static int getNewVersionUrl(Version *v,char *recvdata){
 	cJSON * pJson = cJSON_Parse(recvdata);
 	if(NULL == pJson){
 		printf("cJSON_Parse failed \n");
@@ -84,19 +84,19 @@ static int getNewVersionUrl(Version *v,char *recvdata,char *newUrl){
 	}
 	int iCount = cJSON_GetArraySize(pArray); 
 	int i = 0;	
-    	for (i=0; i < iCount; ++i) {  
-        	cJSON* pItem = cJSON_GetArrayItem(pArray, i);  
-        	if (NULL == pItem){  
-            		continue;  
-        	}  
-    		char *url = cJSON_GetObjectItem(pItem, "url")->valuestring;  
-		sprintf(newUrl,"%s",url);
+    for (i=0; i < iCount; ++i) {  
+       	cJSON* pItem = cJSON_GetArrayItem(pArray, i);  
+       	if (NULL == pItem){  
+       		continue;  
+       	}  
+    	char *url = cJSON_GetObjectItem(pItem, "url")->valuestring;  
+		snprintf(v->newUrl,256,"%s",url);
 		v->newSize = cJSON_GetObjectItem(pItem, "size")->valueint;
 		printf("v->newSize =%d\n",v->newSize);
 		pSub = cJSON_GetObjectItem(pItem, "md5");
 		if(pSub){
-			snprintf(v->newImageMd5,33,"%s",pSub->valuestring);
-			printf("md5 value =%s\n",v->newImageMd5);
+			snprintf(v->newImageMd5,33,"%s",pSub->valuestring);	//提取最新版本信息的md5值
+			printf("newversion md5 value =%s\n",v->newImageMd5);
 		}
     }  
 exit:
@@ -151,9 +151,9 @@ static void versionGetStreamData(const char *data,int size){
 			SendVersionProguess(VERSION_JSON,75);
 		}
 	}
-#else
-	DOWN_DBG("DFile->downSize =%d\n",DFile->downSize);
 #endif
+	DOWN_DBG("DFile->downSize =%d\n",DFile->downSize);
+
 }
 //结束下载
 static void versionEndDownFile(int endsize){
@@ -164,27 +164,28 @@ static void versionEndDownFile(int endsize){
 	//DOWN_DBG("versionEndDownFile =%d\n",DFile->downSize);
 }
 
-//获取服务器版本信息
-static void getServerVersion(Version *v,const char *vserionUrl){
+//获取服务器固件版本信息澹(包含最新版本号、固件下载地址、固件大小、固件md5校验值)
+static int getServerVersionMessage(Version *v,const char *vserionUrl){
 #if 0
+	//下载配置文件
 	DOWN_FILE(vserionUrl,versionStartDownFile,versionGetStreamData,versionEndDownFile);
 	if(DFile->urlFp!=NULL){
 		fclose(DFile->urlFp);
 		DFile->urlFp=NULL;
 	}	
 	//printf("v->versionName = %s\n",v->versionName);
-	char *data =readFileBuf(DFile->filename);
+	char *data =readFileBuf(DFile->filename);	//下载配置文件
 #else
 	char *data =readFileBuf("version.json");//本地txt版本测试
 #endif
 	if(data==NULL){
-		return ;
+		return -1;
 	}
-	getNewVersionUrl(v,data,v->newUrl);
+	getNewVersionUrl(v,data);
 	free(data);	
 	DOWN_DBG("newUrl = %s newSize = %d\n",v->newUrl,v->newSize);
 	memset(DFile->filename,0,64);
-	return ;
+	return 0;
 }
 
 //更新内核镜像，写入flash
@@ -195,6 +196,7 @@ static int updateKernelImage(char *ImageFile,int ImageSize,int newVersion){
 	DOWN_DBG("cmd : %s\n",cmd);
 	int status ;
 	status= system(cmd);
+	//升级成功
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0){
 		printf("exit status = %d\n",status);
 		return -1;
@@ -203,7 +205,7 @@ static int updateKernelImage(char *ImageFile,int ImageSize,int newVersion){
 }
 
 //下载新的内核镜像
-static int DownNewVersion(Version *v){
+static int DownNewImageVersion(Version *v){
 	SendVersionState(VERSION_JSON,START_DOWNIMAGE);
 #ifdef SEND_DOWN_STATE		//发送下载固件的进度状态
 	DFile->enprogress=1;
@@ -216,23 +218,25 @@ static int DownNewVersion(Version *v){
 	DOWN_FILE(url_4,versionStartDownFile,versionGetStreamData,versionEndDownFile);
 #endif	
 	char md5Val[33]={0};
-	if(DFile->downSize==v->newSize){
-		DOWN_DBG("^_^ ^_^ ^_^ ^_^ ^_^ https down image ok ^_^ ^_^ ^_^\n");
-		if(File_Md5Sum((const char *)DFile->filename,md5Val)){
+	if(DFile->downSize==v->newSize){	//下载文件大小一样
+		DOWN_DBG("\n^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^\nhttps down image ok ^_^ ^_^ ^_^ ^_^ ^_^^_^ ^_^ ^_^\n");
+		//检查md5值，确定文件唯一性
+		if(CreateFile_Md5Sum((const char *)DFile->filename,md5Val)){
 			DOWN_DBG("get md5 val failed \n");
 			goto exit0;
 		}	
-		if(!strcmp(md5Val,v->newImageMd5)){
+		if(!strcmp(md5Val,v->newImageMd5)){		//判断下载文件的md5值和服务器上的md5值是不是一样
+			DOWN_DBG("..............check md5 ok ............\n");
 			if(updateKernelImage(DFile->filename,v->newSize,v->newVersion)==0){
-				DOWN_DBG("^_^ ^_^ ^_^ ^_^ ^_^ update image ok ^_^ ^_^ ^_^ \n");
+				DOWN_DBG("^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^\n update image ok \n ^_^ ^_^ ^_^ ^_^ ^_^^_^ ^_^ ^_^ \n");
 				SendVersionState(IMAGE_JSON,END_UPIMAGE);
+			}else{
+				DOWN_DBG("error :check md5  failed .........\n");
+				SendVersionState(IMAGE_JSON,ERROR_UPIMAGE);
 			}
-
 		}
-		else{
-			SendVersionState(IMAGE_JSON,ERROR_UPIMAGE);
-		}
-	}else{
+	
+	}else{	//下载错误
 		DOWN_DBG("error :https down image less [%d] data  \n",v->newSize-DFile->downSize);
 		SendVersionState(VERSION_JSON,ERROR_DOWNIMAGE);
 	}
@@ -240,10 +244,10 @@ static int DownNewVersion(Version *v){
 exit0:
 	return -1;
 }
-//获取路由表当中版本号  (每次更新和上传版本，都需要修改 )\
-//vim vendors/Ralink/MT7628/RT2860_default_vlan --->Version=xxx
-static int getCurrentVersion(int *Version,char *currentMd5,char *versionurl){
-	char *data =readFileBuf(DEVICES_CURRENT_VERSION_JSON_FILE);//本地txt版本测试
+//获取当前板子正在运行的版本信息(每次更新和上传版本，都需要修改 )\
+//Version 当前板子版本信息  versionurl:服务器版本下载地址信息(包含最新版本号、固件下载地址、固件大小、固件md5校验值)
+static int getCurrentVersion(int *Version,char *versionurl){
+	char *data =readFileBuf(DEVICES_CURRENT_VERSION_JSON_FILE);//板子的当前版本信息
 	if(data==NULL){
 		return -1;
 	}
@@ -252,42 +256,38 @@ static int getCurrentVersion(int *Version,char *currentMd5,char *versionurl){
 		printf("cJSON_Parse failed \n");
 		return -1;
 	}
-	cJSON * pSub = cJSON_GetObjectItem(pJson, "version");
+	cJSON * pSub = cJSON_GetObjectItem(pJson, "version");	//当前板子的版本号
 	if(NULL == pSub){
 		printf("get json data  failed\n");
 		goto exit;
 	}
 	*Version = pSub->valueint;
 	DOWN_DBG("version = %d\n", pSub->valueint);
-	pSub = cJSON_GetObjectItem(pJson, "versionurl");
+	pSub = cJSON_GetObjectItem(pJson, "versionurl");		//待升级版本信息配置文件下载地址 (服务器上的地址)
 	if(pSub==NULL){
 		goto exit;
 	}
-	snprintf(versionurl,128,"%s",pSub->valuestring);	
-	pSub = cJSON_GetObjectItem(pJson, "md5");
-	if(pSub==NULL){
-		goto exit;
-	}
-	snprintf(currentMd5,33,"%s",pSub->valuestring);
-	DOWN_DBG(" currentMd5 value =%s\n",currentMd5);
-    	  
+	snprintf(versionurl,128,"%s",pSub->valuestring);
 exit:
 	free(data);
 	cJSON_Delete(pJson);
 	return 0;
 }
-
+//开始检查版本信息，并升级
 static int startCheckVerionAndUpdate(void){
 	char versionurl[128]={0}; 
-	if(getCurrentVersion(&v->curVersion,v->newImageMd5,versionurl)){
+	if(getCurrentVersion(&v->curVersion,versionurl)){
+		printf("get current version message failed \n");
 		return -1;
 	}
-	printf("v->curVersion =%d v->newVersion=%d versionurl=%s\n",v->curVersion,v->newVersion,versionurl);
-	return -1;
-	getServerVersion(v,versionurl);
-	if(v->curVersion<v->newVersion){	//需要更新
-		SendVersionState(VERSION_JSON,NEW_VERSION);
-		DownNewVersion(v);
+	printf("v->curVersion =%d versionurl=%s\n",v->curVersion,versionurl);
+	if(getServerVersionMessage(v,versionurl)){
+		printf("get server version message failed \n");
+		return -1;
+	}
+	if(v->curVersion<v->newVersion){	//检查版本是否需要更新
+		SendVersionState(VERSION_JSON,NEW_VERSION);	//发送更新指令到localserver 进程，语音播放开始下载
+		DownNewImageVersion(v);
 	}else{
 		printf("^_^ ^_^ ^_^do not update image ^_^ ^_^ ^_^\n");
 		remove(DFile->filename);
@@ -341,29 +341,6 @@ static void DownhttpFile(char *url,void StartDownFile(const char *filename,int s
 	setDowning();
 	demoDownFile(url ,60,versionStartDownFile,versionGetStreamData,versionEndDownFile);
 }
-
-#if 0
-static int savefd;
-static void StartDownFile(const char *filename,int streamLen)
-{
-	savefd= open(filename, O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);    
-	if (savefd < 0)    
-	{        
-		printf("Create file failed\n");   
-	}  
-
-}
-static void GetStreamData(const char *data,int size)
-{
-	//printf("size = %d \n",size);
-	write(savefd, data, size);
-}
-static void EndDownFile(int endSize)
-{
-	printf("endSize = %d \n",endSize);
-	close(savefd);
-}
-#endif
 int main(int argc,char **argv){
 	if(access("/var/versionServer.lock",0) < 0){
 		fopen("/var/versionServer.lock","w+");
@@ -404,9 +381,6 @@ int main(int argc,char **argv){
 	init_addr(&v->addr, IP,  20001);
 	if(!strcmp(argv[1],"http")){
 		initCurl();
-		//char *url_4 = "https://raw.githubusercontent.com/daylightnework/MGW/master/root_uImage_new4300_v2";
-		//char *url_4 = "http://fdfs.xmcdn.com/group7/M01/A3/8D/wKgDX1d2Rr6w3CegABHDHZzUiUs448.mp3";
-		//DOWN_FILE(url_4 ,versionStartDownFile,versionGetStreamData,versionEndDownFile);
 #ifdef HOST_PERMISSION
 		HostPermission();
 #endif

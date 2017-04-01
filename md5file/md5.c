@@ -1,17 +1,21 @@
 #include <stdio.h>
 #include <openssl/md5.h>
 
-
-int File_Md5Sum(const char *filename,char *md5Val){  
+/*
+生成文件的md5校验值 
+filename :待校验的文件
+md5Val:生成出的校验值
+*/
+int CreateFile_Md5Sum(const char *filename,char *md5Val){  
         MD5_CTX ctx;  
         int len = 0;  
         unsigned char buffer[1024] = {0};  
         unsigned char digest[16] = {0};  
           
         FILE *pFile = fopen (filename, "rb"); 
-	if(pFile==NULL){
-		return -1;
-	}
+			if(pFile==NULL){
+			return -1;
+		}
         MD5_Init (&ctx);  
      	
         while ((len = fread (buffer, 1, 1024, pFile)) > 0)  
@@ -28,7 +32,7 @@ int File_Md5Sum(const char *filename,char *md5Val){
         int i = 0,pos=0;  
         char buf[33] = {0};  
         char tmp[3] = {0};  
-	len =0;
+		len =0;
         for(i = 0; i < 16; i++ ){  
             snprintf(tmp,3,"%02x", digest[i]); 
             len = snprintf(buf+pos,33-pos,"%s",tmp);

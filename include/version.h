@@ -27,7 +27,7 @@
 #define HOST_PERMISSION_URL	"https://raw.githubusercontent.com/daylightnework/MGW/master/permission.txt"
 
 
-#define DEVICES_CURRENT_VERSION_JSON_FILE	"/home/devicesVersion.json"	
+#define DEVICES_CURRENT_VERSION_JSON_FILE	"/home/devicesVersion.json"		//板子的当前版本信息	(sdk目录下romfs/)
 
 
 typedef struct{
@@ -44,7 +44,6 @@ typedef struct{
 typedef struct{
 	unsigned int newSize;
 	int curVersion;
-	char currentMd5[33];
 	int newVersion;
 	char newImageMd5[33];
 	char newUrl[256];	
