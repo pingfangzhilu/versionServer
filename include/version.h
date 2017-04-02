@@ -53,4 +53,5 @@ typedef struct{
 
 #define DOWN_DBG(fmt, args...)	printf("%s: "fmt,__func__, ## args)
 
+#define VERSION_FILE_LOCK	"/var/versionServer.lock"
 #endif

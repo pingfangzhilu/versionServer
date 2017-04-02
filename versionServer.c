@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>   
 
 #include "cJSON.h"
 #include "version.h"
@@ -161,12 +162,13 @@ static void versionEndDownFile(int endsize){
 		fclose(DFile->urlFp);
 		DFile->urlFp=NULL;
 	}
+	DFile->getHttpLock = START_GET_HTTP_FILENAME_UNLOCK;
 	//DOWN_DBG("versionEndDownFile =%d\n",DFile->downSize);
 }
 
 //获取服务器固件版本信息澹(包含最新版本号、固件下载地址、固件大小、固件md5校验值)
 static int getServerVersionMessage(Version *v,const char *vserionUrl){
-#if 0
+#if 1
 	//下载配置文件
 	DOWN_FILE(vserionUrl,versionStartDownFile,versionGetStreamData,versionEndDownFile);
 	if(DFile->urlFp!=NULL){
@@ -194,28 +196,43 @@ static int updateKernelImage(char *ImageFile,int ImageSize,int newVersion){
 	SendVersionState(IMAGE_JSON,START_UPIMAGE);
 	snprintf(cmd,256,"%s%d%s%s%s","/bin/mtd_write -o 0 -l ",ImageSize," write ",ImageFile," Kernel");
 	DOWN_DBG("cmd : %s\n",cmd);
-	int status ;
-	status= system(cmd);
-	//升级成功
+	int status= system(cmd);
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0){
-		printf("exit status = %d\n",status);
+		printf("exit status = %d\n",status);//升级失败
 		return -1;
 	}
+	//升级成功
 	return 0;
 }
+static int get_file_size(const char *path){    
+    unsigned long filesize = -1;        
+    struct stat statbuff;    
+    if(stat(path, &statbuff) < 0){    
+        return filesize;    
+    }else{    
+        filesize = (int)statbuff.st_size;    
+    }    
+    return filesize;    
+}    
 
+#define LIB_CURL_DOWN
 //下载新的内核镜像
-static int DownNewImageVersion(Version *v){
+static int DownNewImageVersionAndUpdate(DownFile_t *DFile,Version *v){
 	SendVersionState(VERSION_JSON,START_DOWNIMAGE);
 #ifdef SEND_DOWN_STATE		//发送下载固件的进度状态
 	DFile->enprogress=1;
 #endif
 	DOWN_DBG("start down image url = %s\n",v->newUrl);
-#if 1
+#ifdef LIB_CURL_DOWN
 	DOWN_FILE(v->newUrl,versionStartDownFile,versionGetStreamData,versionEndDownFile);
 #else
-	char *url_4 = "https://raw.githubusercontent.com/daylightnework/MGW/master/root_uImage_new4300_v2";
-	DOWN_FILE(url_4,versionStartDownFile,versionGetStreamData,versionEndDownFile);
+	char runCmd[256]={0};
+	char domain[128]={0};
+	int port=0;
+	parse_url((const char *)v->newUrl, domain, &port, DFile->filename);
+	snprintf(runCmd,256,"wget %s",v->newUrl);
+	system(runCmd);
+	get_file_size(DFile->filename);
 #endif	
 	char md5Val[33]={0};
 	if(DFile->downSize==v->newSize){	//下载文件大小一样
@@ -230,8 +247,9 @@ static int DownNewImageVersion(Version *v){
 			if(updateKernelImage(DFile->filename,v->newSize,v->newVersion)==0){
 				DOWN_DBG("^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^ ^_^\n update image ok \n ^_^ ^_^ ^_^ ^_^ ^_^^_^ ^_^ ^_^ \n");
 				SendVersionState(IMAGE_JSON,END_UPIMAGE);
+				remove(DFile->filename);	//删除缓存在内存当中的固件
 			}else{
-				DOWN_DBG("error :check md5  failed .........\n");
+				DOWN_DBG("error :updatekernel   failed .........\n");
 				SendVersionState(IMAGE_JSON,ERROR_UPIMAGE);
 			}
 		}
@@ -287,7 +305,7 @@ static int startCheckVerionAndUpdate(void){
 	}
 	if(v->curVersion<v->newVersion){	//检查版本是否需要更新
 		SendVersionState(VERSION_JSON,NEW_VERSION);	//发送更新指令到localserver 进程，语音播放开始下载
-		DownNewImageVersion(v);
+		DownNewImageVersionAndUpdate(DFile,v);
 	}else{
 		printf("^_^ ^_^ ^_^do not update image ^_^ ^_^ ^_^\n");
 		remove(DFile->filename);
@@ -299,6 +317,7 @@ static int startCheckVerionAndUpdate(void){
 }
 
 #ifdef HOST_PERMISSION
+//获取服务器设备运行权限列表
 static void HostPermission(void){
 	HostList *host = readPermission();
 	if(host==NULL){
@@ -337,28 +356,38 @@ exit0:
 	free(host);
 }
 #endif
+
+#define VERSION_SERVER_HELP 	"please input update image type : \n \
+versionServer http ---->user http server update image \n  \  
+versionServer web ---->user local web server update image\n"	
+
+//下载服务器 http 文件
 static void DownhttpFile(char *url,void StartDownFile(const char *filename,int streamLen),void GetStreamData(const char *data,int size),void EndDownFile(int endSize)){
 	setDowning();
-	demoDownFile(url ,60,versionStartDownFile,versionGetStreamData,versionEndDownFile);
+	demoDownFile(url ,600,versionStartDownFile,versionGetStreamData,versionEndDownFile);
 }
 int main(int argc,char **argv){
-	if(access("/var/versionServer.lock",0) < 0){
-		fopen("/var/versionServer.lock","w+");
+	if(access(VERSION_FILE_LOCK,0) < 0){
+		FILE *fp = fopen(VERSION_FILE_LOCK,"w+");
+		if(fp){
+			fclose(fp);
+		}
 	}else{
-		printf("please delete /var/versionServer.lock \n");
-		exit(1);
+		printf("please delete %s \n",VERSION_FILE_LOCK);
+		exit(-1);
 	}
 	if(argc<2){
-		exit(1);
+		printf(VERSION_SERVER_HELP);
+		goto exit;
 	}
-	
+	int ret=-1;
 	v= (Version *)calloc(1,sizeof(Version));
 	if(v==NULL){
-		return -1;
+		goto exit;
 	}	
 	DFile= (DownFile_t *)calloc(1,sizeof(DownFile_t));
 	if(DFile==NULL){
-		return -1;
+		goto exit0;
 	}	
 	if(!strcmp(argv[1],"http")){
 		v->vsock= create_listen_udp(NULL,20002);
@@ -369,13 +398,13 @@ int main(int argc,char **argv){
 	
 	if(v->vsock<=0){
 		perror("create udp socket failed ");
-		return -1;
+		goto exit1;
 	}
 
 	char IP[20]={0};
 	if(GetNetworkcardIp("br0",IP)) {
 		perror("get br0 ip failed");
-		//return -1;
+		//goto exit2
 	}
 	printf("IP = %s\n",IP);
 	init_addr(&v->addr, IP,  20001);
@@ -384,14 +413,20 @@ int main(int argc,char **argv){
 #ifdef HOST_PERMISSION
 		HostPermission();
 #endif
-		startCheckVerionAndUpdate();
+		ret =startCheckVerionAndUpdate();
 		cleanCurl();
 	}
 	else if(!strcmp(argv[1],"web")){	//web界面发送语音通知更新固件
-		SendVersionState(IMAGE_JSON,END_DOWNIMAGE);
+		ret =SendVersionState(IMAGE_JSON,END_DOWNIMAGE);
 	}
+	ret=0;
+exit2:	
 	close(v->vsock);
-	free(v);
+exit1:
 	free(DFile);
-	return 0;
+exit0:	
+	free(v);
+exit:	
+	remove(VERSION_FILE_LOCK);
+	return ret;
 }
